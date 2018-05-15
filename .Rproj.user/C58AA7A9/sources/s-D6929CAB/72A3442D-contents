@@ -1,0 +1,132 @@
+library(devtools)
+library(twitteR)
+library(httr)
+library(sentiment)
+library(DT)
+library(devtools)
+library(wordcloud)
+library(RColorBrewer)
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(devtools, installr)
+
+api_key <- "t4f2zQp9044P92l5J6PCz9wW2"
+api_secret <- "cEKCFf9YSRYMnqMnKXizZ4RKB8dixPdGXgdtYmLYrY1xYY4HAV"
+access_token <- "2717578724-rzBS0rZcNBg6xecEpFukQTFP4DVd4adeOgrhGHT"
+access_token_secret <- "MeUkekEJ2Hu5f8uD9YECWBMhjJ9YdQ3mC9H7jbcbd00l0"
+setup_twitter_oauth(api_key,api_secret,access_token,access_token_secret)
+
+#Step1: Tweets Extraction
+
+modi_tweets <- searchTwitter("$narendramodi", n = 10000, lang='en')
+some_txt = sapply(modi_tweets, function(x) x$getText())
+tweetsdf <- twListToDF(modi_tweets)
+write.csv(tweetsdf, file='D:/Documents/project/moditweets1.csv',row.names = F)
+#Step2: Data Cleaning
+
+some_txt = gsub('(RT|via)((?:\\b\\W*@\\w+)+)', '', some_txt)
+some_txt = gsub('@\\w+', '', some_txt)
+some_txt = gsub('[[:punct:]]', '', some_txt)
+some_txt = gsub('[[:digit:]]', '', some_txt)
+some_txt = gsub('http\\w+', '', some_txt)
+some_txt = gsub('[ \t]{2,}', '', some_txt)
+some_txt = gsub('^\\s+|\\s+$', '', some_txt)
+
+try.error = function(x)
+{
+  y = NA
+  try_error = tryCatch(tolower(x), error=function(e) e)
+  if (!inherits(try_error, 'error'))
+    y = tolower(x)
+  return(y)
+}
+some_txt = sapply(some_txt, try.error)
+some_txt = some_txt[!is.na(some_txt)]
+names(some_txt) = NULL
+
+#Step3: Emotion and Polarity Graphs
+
+#function to classify emotion
+
+class_emo = classify_emotion(some_txt, algorithm='bayes', prior=1.0)
+emotion = class_emo[,7]
+emotion[is.na(emotion)] = 'unknown'
+
+#function to classify polarity
+
+class_pol = classify_polarity(some_txt, algorithm='bayes')
+polarity = class_pol[,4]
+sent_df = data.frame(text=some_txt, emotion=emotion,
+                     polarity=polarity, stringsAsFactors=FALSE)
+dfConn<-file("emo_pol.txt")
+writeLines(as.character(sent_df),dfConn)
+close(dfConn)
+sent_df
+sent_df = within(sent_df,
+                 emotion <- factor(emotion, levels=names(sort(table(emotion), decreasing=TRUE))))
+sent_df
+
+sent_df = data.frame(text = sent_df, emotion = emotion,
+                     polarity = polarity, stringsAsFactors = FALSE)
+sent_df = within(sent_df,
+                 emotion <- factor(emotion, 
+                                   levels = names(sort(table(emotion), 
+                                                       decreasing = TRUE))))
+datatable(sent_df, class = "cell-border-stripe", 
+          rownames = TRUE, 
+          colnames = c("tweet", "Emotion", "Polarity"), 
+          options = list(pageLength = 10))
+
+#plot for emotion
+
+ggplot(sent_df, aes(x=emotion)) +
+  geom_bar(aes(y=..count.., fill=emotion)) +
+  scale_fill_brewer(palette='Dark2') +
+  labs(x='emotion categories', y='number of tweets') +
+  ggtitle('Sentiment Analysis of Tweets about Narendra Modi\n(classification by emotion)') +
+  theme(plot.title = element_text(size=12, face='bold'))
+
+#plot for polarity
+
+ggplot(sent_df, aes(x=polarity)) +
+  geom_bar(aes(y=..count.., fill=polarity)) +
+  scale_fill_brewer(palette='RdGy') +
+  labs(x='polarity categories', y='number of tweets') +
+  ggtitle('Sentiment Analysis of Tweets about Narendra Modi\n(classification by polarity)') +
+  theme(plot.title = element_text(size=12, face='bold'))
+emos = levels(factor(sent_df$emotion))
+nemo = length(emos)
+emo.docs = rep('', nemo)
+for (i in 1:nemo)
+{
+  tmp = some_txt[emotion == emos[i]]
+  emo.docs[i] = paste(tmp, collapse=' ')
+}
+emo.docs = removeWords(emo.docs, stopwords('english'))
+emo.docs = removeWords(emo.docs, stopwords('german'))
+emo.docs = removeWords(emo.docs, stopwords('french'))
+corpus = Corpus(VectorSource(emo.docs))
+tdm = TermDocumentMatrix(corpus)
+tdm = as.matrix(tdm)
+colnames(tdm) = emos
+
+#Step4 : Word Cloud Generation 
+
+comparison.cloud(tdm, colors = brewer.pal(nemo, 'Dark2'),
+                 scale = c(3,.5), random.order = FALSE, title.size = 1.5)
+emos = levels(factor(sent_df$emotion))
+nemo = length(emos)
+emo.docs = rep("", nemo)
+for (i in 1:nemo)
+{
+  tmp = some_txt[emotion == emos[i]]
+  emo.docs[i] = paste(tmp, collapse=" ")
+}
+
+comparison.cloud(tdm, colors = brewer.pal(nemo, "Dark2"),
+                 scale = c(3,.5), random.order = FALSE, title.size = 1.5)
+col <- brewer.pal(8, "Dark2")
+wordcloud(some_txt, min.freq = 5, scale = c(6,3), rot.per = 0.25, 
+          random.color = T, max.word = 35, random.order = F, colors = col)
+
+
